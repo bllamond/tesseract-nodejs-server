@@ -58,56 +58,70 @@
 //     console.log(`OCR server running at http://localhost:${port}`);
 // });
 
-const express = require("express");
-const Tesseract = require("tesseract.js");
 
-const app = express();
-const port = 3000;
+// import express from "express";
+// import ocrRoutes from "./routes/ocrRoutes.js"; // Add .js extension
 
-// Middleware to parse JSON bodies
-// app.use(express.json());
-app.use(express.json({ limit: "10mb" }));
-// API to get text from a base64 image
+// const app = express();
+// const port = 3000;
 
-app.post("/api/get-text", async (req, res) => {
-    const { base64_image } = req.body;
+// app.use(express.json({ limit: "10mb" }));
+// app.use("/api", ocrRoutes);
 
-    if (!base64_image) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No image provided." });
-    }
+// app.listen(port, () => {
+//   console.log(`Server is running on http://localhost:${port}`);
+// });
 
-    // Decode the base64 image
-    const imageBuffer = Buffer.from(base64_image, "base64");
 
-    // Create a temporary file
-    const imagePath = "temp_image.png";
-    require("fs").writeFileSync(imagePath, imageBuffer);
 
-    try {
-      const result = await Tesseract.recognize(imagePath, "eng", {
-        logger: (m) => console.log(m),
-      });
+// const express = require("express");
+// const Tesseract = require("tesseract.js");
 
-      // Set Content-Type to application/json without charset
-      res.type('application/json'); // Sets Content-Type correctly
-      res.json({
-        success: true,
-        result: {
-          text: result.data.text,
-        },
-      });
-    } catch (err) {
-      res.status(500).json({
-        success: false,
-        message: "Error processing image",
-        error: err.message,
-      });
-    } finally {
-      require("fs").unlinkSync(imagePath);
-    }
-  });
+// const app = express();
+// const port = 3000;
+
+// app.use(express.json({ limit: "10mb" }));
+
+// app.post("/api/get-text", async (req, res) => {
+
+//   console.log('inside controller')
+//     const { base64_image } = req.body;
+
+//     if (!base64_image) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "No image provided." });
+//     }
+
+//     // Decode the base64 image
+//     const imageBuffer = Buffer.from(base64_image, "base64");
+
+//     // Create a temporary file
+//     const imagePath = "temp_image.png";
+//     require("fs").writeFileSync(imagePath, imageBuffer);
+
+//     try {
+//       const result = await Tesseract.recognize(imagePath, "eng", {
+//         logger: (m) => console.log(m),
+//       });
+
+//       res.type('application/json');
+//       res.json({
+//         success: true,
+//         result: {
+//           text: result.data.text,
+//         },
+//       });
+//     } catch (err) {
+//       res.status(500).json({
+//         success: false,
+//         message: "Error processing image",
+//         error: err.message,
+//       });
+//     } finally {
+//       require("fs").unlinkSync(imagePath);
+//     }
+//   });
 
 // app.post("/api/get-text", async (req, res) => {
 //   const { base64_image } = req.body;
@@ -149,6 +163,152 @@ app.post("/api/get-text", async (req, res) => {
 // });
 
 // Start the server
-app.listen(port, () => {
-  console.log(`OCR server running at http://localhost:${port}`);
+// app.listen(port, () => {
+//   console.log(`OCR server running at http://localhost:${port}`);
+// });
+
+// const tesseract = require('node-tesseract-ocr');
+// const config = {
+//   lang: "eng",
+//   oem: 1,
+//   psm: 3,
+// }
+
+// tesseract
+//   .recognize("image.png", config)
+//   .then((text) => {
+//     console.log("Result:", text)
+//   })
+//   .catch((error) => {
+//     console.log(error.message)
+//   })
+
+
+const express = require("express");
+const tesseract = require("node-tesseract-ocr");
+const fs  = require('fs');
+
+const app = express();
+const port = 3000;
+
+// Middleware to parse JSON body
+app.use(express.json({ limit: "10mb" }));
+
+// Tesseract configuration
+const config = {
+  lang: "eng",
+  oem: 1,
+  psm: 3,
+};
+
+// API Endpoint to get text from an image
+app.post("/api/get-text", async (req, res) => {
+  const { base64_image } = req.body; // Extract base64_image from the request body
+
+  if (!base64_image) {
+    // If base64_image is not provided, return a 400 Bad Request response
+    return res
+      .status(400)
+      .json({ success: false, message: "No image provided." });
+  }
+
+  try {
+    // Decode the base64 image to a Buffer
+    const imageBuffer = Buffer.from(base64_image, "base64");
+
+    // Run Tesseract OCR on the image buffer
+    const text = await tesseract.recognize(imageBuffer, config);
+
+    // Return the extracted text in the response
+    res.type("application/json");
+    res.json({
+      success: true,
+      result: {
+        text: text // The OCR result text
+      }
+    });
+  } catch (error) {
+    // Handle errors during the OCR process
+    res.status(500).json({
+      success: false,
+      message: "Error processing image",
+      error: error.message
+    });
+  }
 });
+
+
+app.post("/api/get-bboxes", async (req, res) => {
+  const { base64_image, bbox_type } = req.body;
+
+  if (!base64_image) {
+      return res.status(400).json({ success: false, message: "No image provided." });
+  }
+
+  try {
+      const imageBuffer = Buffer.from(base64_image, "base64");
+      const config = {
+          lang: "eng",
+          oem: 1,
+          psm: 3 
+      };
+
+      // Perform OCR using Tesseract
+      const result = await tesseract.recognize(imageBuffer, config);
+      console.log("Tesseract Result:", result); 
+
+      if (typeof result === 'string') {
+          console.log("Recognized Text:", result);
+          return res.json({
+              success: true,
+              result: {
+                  text: result,
+                  bboxes: [] 
+              }
+          });
+      } else {
+
+          const words = result.data.words;
+          if (!words || words.length === 0) {
+              return res.status(500).json({
+                  success: false,
+                  message: "Error processing image",
+                  error: "No words found in the result."
+              });
+          }
+
+          // Extract bounding boxes from words
+          const bboxes = words.map(word => ({
+              x_min: word.bbox.x0,
+              y_min: word.bbox.y0,
+              x_max: word.bbox.x1,
+              y_max: word.bbox.y1
+          }));
+
+          res.json({
+              success: true,
+              result: {
+                  bboxes: bboxes
+              }
+          });
+      }
+  } catch (error) {
+      res.status(500).json({
+          success: false,
+          message: "Error processing image",
+          error: error.message
+      });
+  }
+});
+
+
+
+
+
+
+// Start the server
+app.listen(port, () => {
+  console.log(`Server is running on http://localhost:${port}`);
+});
+
+

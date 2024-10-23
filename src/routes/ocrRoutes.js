@@ -1,8 +1,8 @@
-const express = require('express');
+import express from "express";
+import { extractText } from "../controllers/ocrController";
+
 const router = express.Router();
-const { getTextFromBase64, getBoundingBoxes } = require('../controllers/ocrController');
 
-router.post('/get-text', getTextFromBase64);
-// router.post('/get-bboxes', getBoundingBoxes);
+router.post("/get-text", extractText);
 
-module.exports = router;
+export default router;
