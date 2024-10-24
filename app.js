@@ -162,64 +162,38 @@
 //   }
 // });
 
-// Start the server
-// app.listen(port, () => {
-//   console.log(`OCR server running at http://localhost:${port}`);
-// });
-
-// const tesseract = require('node-tesseract-ocr');
-// const config = {
-//   lang: "eng",
-//   oem: 1,
-//   psm: 3,
-// }
-
-// tesseract
-//   .recognize("image.png", config)
-//   .then((text) => {
-//     console.log("Result:", text)
-//   })
-//   .catch((error) => {
-//     console.log(error.message)
-//   })
-
 
 const express = require("express");
 const tesseract = require("node-tesseract-ocr");
 const fs  = require('fs');
+const sharp = require('sharp');
+const { exec } = require('child_process');
 
 const app = express();
 const port = 3000;
 
-// Middleware to parse JSON body
 app.use(express.json({ limit: "10mb" }));
 
-// Tesseract configuration
 const config = {
   lang: "eng",
   oem: 1,
   psm: 3,
 };
 
-// API Endpoint to get text from an image
 app.post("/api/get-text", async (req, res) => {
-  const { base64_image } = req.body; // Extract base64_image from the request body
+  const { base64_image } = req.body; 
 
   if (!base64_image) {
-    // If base64_image is not provided, return a 400 Bad Request response
     return res
       .status(400)
       .json({ success: false, message: "No image provided." });
   }
 
   try {
-    // Decode the base64 image to a Buffer
     const imageBuffer = Buffer.from(base64_image, "base64");
 
-    // Run Tesseract OCR on the image buffer
     const text = await tesseract.recognize(imageBuffer, config);
 
-    // Return the extracted text in the response
     res.type("application/json");
     res.json({
       success: true,
@@ -228,7 +202,6 @@ app.post("/api/get-text", async (req, res) => {
       }
     });
   } catch (error) {
-    // Handle errors during the OCR process
     res.status(500).json({
       success: false,
       message: "Error processing image",
@@ -238,67 +211,90 @@ app.post("/api/get-text", async (req, res) => {
 });
 
 
-app.post("/api/get-bboxes", async (req, res) => {
-  const { base64_image, bbox_type } = req.body;
+app.post('/api/get-bboxes', async (req, res) => {
+    const { base64_image, bbox_type } = req.body;
 
-  if (!base64_image) {
-      return res.status(400).json({ success: false, message: "No image provided." });
-  }
+    if (!base64_image || typeof base64_image !== 'string') {
+        return res.status(400).json({
+            success: false,
+            error: { message: 'Invalid base64_image.' }
+        });
+    }
 
-  try {
-      const imageBuffer = Buffer.from(base64_image, "base64");
-      const config = {
-          lang: "eng",
-          oem: 1,
-          psm: 3 
-      };
+    const validBboxTypes = ['word', 'line', 'paragraph', 'block', 'page'];
+    if (!bbox_type || !validBboxTypes.includes(bbox_type)) {
+        return res.status(400).json({
+            success: false,
+            error: { message: 'Invalid bbox_type.' }
+        });
+    }
 
-      // Perform OCR using Tesseract
-      const result = await tesseract.recognize(imageBuffer, config);
-      console.log("Tesseract Result:", result); 
+    try {
+        const imageBuffer = Buffer.from(base64_image, 'base64');
+        // console.log("Image buffer size:", imageBuffer.length);
 
-      if (typeof result === 'string') {
-          console.log("Recognized Text:", result);
-          return res.json({
-              success: true,
-              result: {
-                  text: result,
-                  bboxes: [] 
-              }
-          });
-      } else {
+        const tempImagePath = 'temp_image.png';
+        await sharp(imageBuffer).toFile(tempImagePath);
 
-          const words = result.data.words;
-          if (!words || words.length === 0) {
-              return res.status(500).json({
-                  success: false,
-                  message: "Error processing image",
-                  error: "No words found in the result."
-              });
-          }
+        exec(`tesseract ${tempImagePath} stdout --psm 6 -c tessedit_create_tsv=1`, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Tesseract error: ${error.message}`);
+                return res.status(500).json({
+                    success: false,
+                    error: { message: 'Error processing image.' }
+                });
+            }
 
-          // Extract bounding boxes from words
-          const bboxes = words.map(word => ({
-              x_min: word.bbox.x0,
-              y_min: word.bbox.y0,
-              x_max: word.bbox.x1,
-              y_max: word.bbox.y1
-          }));
+            const lines = stdout.split('\n');
+            const bboxes = [];
 
-          res.json({
-              success: true,
-              result: {
-                  bboxes: bboxes
-              }
-          });
-      }
-  } catch (error) {
-      res.status(500).json({
-          success: false,
-          message: "Error processing image",
-          error: error.message
-      });
-  }
+            let targetLevel = 5; // Default to word level
+            if (bbox_type === 'line') {
+                targetLevel = 4;
+            } else if (bbox_type === 'paragraph') {
+                targetLevel = 3;
+            } else if (bbox_type === 'block') {
+                targetLevel = 2;
+            } else if (bbox_type === 'page') {
+                targetLevel = 1;
+            }
+
+            lines.forEach((line) => {
+                const columns = line.split('\t');
+                if (columns.length > 10 && columns[0] === targetLevel.toString()) {
+                    const [level, page_num, block_num, par_num, line_num, word_num, left, top, width, height, conf, text] = columns;
+
+                    bboxes.push({
+                        x_min: parseInt(left, 10),
+                        y_min: parseInt(top, 10),
+                        x_max: parseInt(left, 10) + parseInt(width, 10),
+                        y_max: parseInt(top, 10) + parseInt(height, 10),
+                        confidence: parseFloat(conf),
+                        text: text.trim()
+                    });
+                }
+            });
+
+            fs.unlink(tempImagePath, (err) => {
+                if (err) {
+                    console.error(`Failed to delete temporary file: ${err.message}`);
+                }
+            });
+
+            res.json({
+                success: true,
+                result: {
+                    bboxes: bboxes
+                }
+            });
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: { message: 'Error processing image.' }
+        });
+    }
 });
 
 
